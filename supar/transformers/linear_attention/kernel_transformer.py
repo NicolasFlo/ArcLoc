@@ -138,35 +138,10 @@ class Kernel_transformer(nn.Module):
         # For each sample x in the batch, calculate M(x) = len(x)
         M = lengths
         # M -> [batch_size]
-        if not self.flattened:
-            idxs = math.pi / 2 * torch.arange(max_len).to(lengths)
-            # idxs -> [max_len]
-            idxs = torch.outer(1.0 / M, idxs)  # [..., None, None]
-            # idxs -> [batch_size, max_len]
-        else:
-            root = max_len**(1/2)
-            flat = torch.arange(max_len).to(lengths)
-            # If the original sequence was a 2-D Matrix then the notion of distance between i and j is different.
-            if self.dist_choice == 1:
-                # here the distance is the mean of the distance in the vertical and horizontal axes.
-                vertical_dist = flat / root
-                horizontal_dist = flat % root
-                dist = (vertical_dist + horizontal_dist) / 2
-            if self.dist_choice == 2:
-                # here the distance is the distance in the vertical axis.
-                dist = flat / root
-            if self.dist_choice == 3:
-                # here the distance is the distance in the horizontal axis.
-                dist = flat % root
-            if self.dist_choice == 4:
-                # here the distance is the L1 distance (check for correctness)
-                vertical_dist = flat / root
-                horizontal_dist = flat % root
-                dist = (vertical_dist + horizontal_dist)
-            idxs = math.pi / 2 * dist
-            # idxs -> [max_len]
-            idxs = torch.outer(1.0 / (M/root), idxs)  # [..., None, None]
-            # idxs -> [batch_size, max_len]            
+        idxs = math.pi / 2 * torch.arange(max_len).to(lengths)
+        # idxs -> [max_len]
+        idxs = torch.outer(1.0 / M, idxs)  # [..., None, None]
+        # idxs -> [batch_size, max_len]
 
         cos = torch.cos(idxs).detach()
         sin = torch.sin(idxs).detach()

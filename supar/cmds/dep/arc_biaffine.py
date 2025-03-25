@@ -27,15 +27,11 @@ def main():
     parser.add_argument('--rel_size', default=512, type=int, help='Size of rel representations. Default: 512.')
     parser.add_argument('--n_heads_arcs', default=32, type=int, help="Number of attention heads for arc transformers that have them. Default: 32.")
     parser.add_argument('--n_heads_rels', default=32, type=int, help="Number of attention heads for rel transformers that have them. Default: 32.")
-    parser.add_argument('--n_local_heads', default=0, type=int, help='Number of local attention heads for transformers that have them. Default: 0.')
     parser.add_argument('--n_layers_arcs', default=1, type=int, help="Number of layers for arc transformers. Default: 1.")
     parser.add_argument('--n_layers_rels', default=1, type=int, help="Number of layers for rel transformers. Default: 1.")
     parser.add_argument('--filter_dropout_rate', default=.33, type=float, help='The dropout ratio of the filter MLP. Default: .33.')
     parser.add_argument('--scoring_dropout_rate', default=.33, type=float, help='The dropout ratio of the scoring MLPs. Default: .33.')
-    parser.add_argument('--transformer_encoder_dropout_rate', default=.33, type=float, help='The dropout ratio of the GateTransformerEncoderLayer. Default: .33.')
-    parser.add_argument('--max_seq', default=8192, type=int, help='Max sequence length for relevant transformers. Default: 8192.')
-    parser.add_argument('--masked_arc_scorer', default='mlp', help='Choice between a multilayer perceptron or a linear transformation '\
-                        'to get the first scores of the arcs to be used to create a filter (mlp or lin). Default: mlp.')
+    parser.add_argument('--transformer_encoder_dropout_rate', default=.33, type=float, help='The dropout ratio of the TransformerEncoderLayer. Default: .33.')
     parser.add_argument('--separate_scoring', default="True", help="If True, the arcs and rels scoring will be done using 2 MLPs "\
                         "(or linear transformations) else only 1 is used and its output is separated into arc scores and rel scores. "\
                         "Default: True.")
@@ -58,10 +54,6 @@ def main():
     parser.add_argument('--filter_factor', default=3, type=int,
                         help="Choose how many of the best arcs will be chosen if a filter is used.\n"\
                         'Default: 3')
-    parser.add_argument('--use_gumbel_noise', default="True", help="Whether or not to add noise from a gumbel distribution to the initial filter scores.\n"\
-                        "Default: True.")
-    parser.add_argument('--use_gumbel_sampling', default="True", help="Whether to sample the k best head candidates when filtering using a gumbel softmax or a simple sort (False).\n"\
-                        "Default: True.")
     parser.add_argument('--gumbel_scale', default=0.005, type=float,
                         help="The scale of the gumbel distribution to be added to the filter scores.\n"\
                         "Default: 0.005.")

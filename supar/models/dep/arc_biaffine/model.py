@@ -105,7 +105,7 @@ class ArcBiaffineDependencyModel(Model):
         scoring_dropout_rate (float):
             The dropout ratio of the scoring MLPs. Default: .33.
         transformer_encoder_dropout_rate (float):
-            The dropout ratio of the GateTransformerEncoderLayer. Default: .33.
+            The dropout ratio of the TransformerEncoderLayer. Default: .33.
         scale (float):
             Scaling factor for affine scores. Default: 0.
         pad_index (int):
@@ -132,20 +132,10 @@ class ArcBiaffineDependencyModel(Model):
             Number of attention heads for arcs' transformers that have them. Default: 32.
         n_heads_rels (int):
             Number of attention heads for rels' transformers that have them. Default: 32.
-        n_local_heads (int):
-            Number of local attention heads for transformers that have them. Default: 0.
         n_layers_arcs (int):
             Number of layers for arc transformers. Default: 1.
         n_layers_rels (int):
             Number of layers for rel transformers. Default: 1.
-        max_seq (int):
-            Max sequence length for relevant transformers. Default: 8192.
-        masked_arc_scorer:
-            Choice between a multilayer perceptron or a linear transformation to get the first scores of the arcs to be used to create a filter (mlp or lin). Default: mlp.
-        arc_scorer:
-            Choice between a multilayer perceptron or a linear transformation to get the scores of the arcs (mlp or lin). Default: mlp.
-        rel_scorer:
-            Choice between a multilayer perceptron or a linear transformation to get the scores of the rels (mlp or lin). Default: mlp.
         separate_scoring (bool):
             If True, the arcs and rels scoring will be done using 2 MLPs (or linear transformations), else only 1 is used and
             its output is separated into arc scores and rel scores. Default: True.
@@ -182,8 +172,6 @@ class ArcBiaffineDependencyModel(Model):
             Choose how many of the best arcs will be chosen if a filter is used. Default: 3.
         use_gumbel_noise (bool):
             Whether or not to add noise from a gumbel distribution to the initial filter scores. Default: True.
-        use_gumbel_sampling (bool):
-            Whether to sample the k best head candidates when filtering using a gumbel softmax or a simple sort (False). Default: True.
         gumbel_scale (float):
             The scale of the gumbel distribution to be added to the filter scores. Default: 0.005.
         use_layernorm (bool):
@@ -228,20 +216,14 @@ class ArcBiaffineDependencyModel(Model):
                  rel_size,
                  n_heads_arcs,
                  n_heads_rels,
-                 n_local_heads,
                  n_layers_arcs,
                  n_layers_rels,
-                 max_seq,
-                 masked_arc_scorer,
-                 arc_scorer,
-                 rel_scorer,
                  separate_scoring,
                  use_biaffine_filter,
                  use_layer_filter,
                  learn_filter,
                  filter_factor,
                  use_gumbel_noise,
-                 use_gumbel_sampling,
                  gumbel_scale,
                  use_layernorm,
                  arc_rel_scale,
@@ -306,7 +288,6 @@ class ArcBiaffineDependencyModel(Model):
         self.learn_filter = learn_filter
         self.filter_factor = filter_factor
         self.use_gumbel_noise = eval(use_gumbel_noise)
-        self.use_gumbel_sampling = eval(use_gumbel_sampling)
         self.gumbel_scale = gumbel_scale
         self.separate_scoring = eval(separate_scoring)
         self.use_layernorm = eval(use_layernorm)
@@ -389,10 +370,7 @@ class ArcBiaffineDependencyModel(Model):
             # Choose between a linear transformation or MLP for the filter
             n_in_scoring = original_arc_size
             n_hid_scoring = n_in_scoring//2
-            if masked_arc_scorer == "lin":
-                self.masked_arc_scorer = nn.Linear(n_in_scoring, 1)
-            elif masked_arc_scorer == "mlp":
-                self.masked_arc_scorer = MLP(n_in=n_in_scoring, n_hid=n_hid_scoring, n_out=1, dropout=filter_dropout_rate)
+            self.masked_arc_scorer = MLP(n_in=n_in_scoring, n_hid=n_hid_scoring, n_out=1, dropout=filter_dropout_rate)
 
         self.arc_resizer = nn.Linear(original_arc_size, arc_size) if original_arc_size != arc_size else nn.Identity()
         if self.use_rel_biaffine:
@@ -411,19 +389,10 @@ class ArcBiaffineDependencyModel(Model):
         n_in_rel_scoring = round(post_resizer2_rel_size * (feature_scale if self.separate_features else 1))
         n_hid_rel_scoring = n_rels*2
         if self.separate_scoring:
-            if arc_scorer == "lin":
-                self.arc_scorer = nn.Linear(n_in_arc_scoring, 1)
-            elif arc_scorer == "mlp":
-                self.arc_scorer = MLP(n_in=n_in_arc_scoring, n_hid=n_hid_arc_scoring, n_out=1, dropout=scoring_dropout_rate)
-            if rel_scorer == "lin":
-                self.rel_scorer = nn.Linear(n_in_rel_scoring, n_rels)
-            elif rel_scorer == "mlp":
-                self.rel_scorer = MLP(n_in=n_in_rel_scoring, n_hid=n_hid_rel_scoring, n_out=n_rels, dropout=scoring_dropout_rate)
+            self.arc_scorer = MLP(n_in=n_in_arc_scoring, n_hid=n_hid_arc_scoring, n_out=1, dropout=scoring_dropout_rate)
+            self.rel_scorer = MLP(n_in=n_in_rel_scoring, n_hid=n_hid_rel_scoring, n_out=n_rels, dropout=scoring_dropout_rate)
         else:
-            if arc_scorer == "lin":
-                self.scorer = nn.Linear(n_in_rel_scoring, n_rels+1)
-            elif arc_scorer == "mlp":
-                self.scorer = MLP(n_in=n_in_rel_scoring, n_hid=n_hid_rel_scoring, n_out=n_rels+1, dropout=scoring_dropout_rate)
+            self.scorer = MLP(n_in=n_in_rel_scoring, n_hid=n_hid_rel_scoring, n_out=n_rels+1, dropout=scoring_dropout_rate)
 
         # Layernorms
         if self.use_layernorm:
@@ -442,15 +411,12 @@ class ArcBiaffineDependencyModel(Model):
                     d_model=arc_size, dim_feedforward=4*arc_size,
                     nhead=n_heads_arcs, batch_first=True, norm_first=True,
                     dropout=transformer_encoder_dropout_rate),
-                num_layers=n_layers_arcs
             )
         elif arc_transformer_choice == 2:
             self.arc_transformer = Kernel_transformer(
                 use_cos=False,
                 kernel="elu",
                 layer_norm_choice=layer_norm_choice,
-                flattened=flattened,
-                dist_choice=dist_choice,
                 use_causal_mask=use_causal_mask,
                 d_model=arc_size,
                 n_heads=n_heads_arcs,
@@ -480,8 +446,6 @@ class ArcBiaffineDependencyModel(Model):
                     use_cos=False,
                     kernel="elu",
                     layer_norm_choice=layer_norm_choice,
-                    flattened=flattened,
-                    dist_choice=dist_choice,
                     use_causal_mask=use_causal_mask,
                     d_model=rel_size,
                     n_heads=n_heads_rels,
@@ -507,25 +471,24 @@ class ArcBiaffineDependencyModel(Model):
             # automatically choose gold arcs for each sentence
             golds = 1.1 * functional.one_hot(arcs, n)
 
-        if self.use_gumbel_sampling:
-            s_arc_filter = s_arc_filter.view(batch_size*n,n)
-            # Warm-up
-            s_arc_filter *= self.gumbel_beta if self.training else 1
-            m = torch.distributions.gumbel.Gumbel(s_arc_filter, torch.tensor([self.gumbel_scale]).cuda())
-            # Add Gumbel noise to filter scores
-            s_arc_filter = m.sample(torch.tensor([1]).cuda()).squeeze(0).view(batch_size*n,n) if self.training else s_arc_filter
-            # Apply softmax to noisy filter logits without out of bounds arcs
-            s_arc_filter = torch.nn.Softmax(dim=1)(s_arc_filter+full_mask.view(batch_size*n,n)) #(BN,N)
-            s_arc_filter_modified = s_arc_filter.detach().clone()
-            if self.training:
-                # Add gold arcs
-                golds = golds.view(batch_size*n,n)
-                s_arc_filter_modified = torch.where(golds > 1, golds, s_arc_filter_modified)
-            selected_arcs = torch.topk(s_arc_filter_modified, k, dim=1).indices.cuda()
-            hard = torch.nn.functional.one_hot(selected_arcs, num_classes=n)
-            soft = s_arc_filter.unsqueeze(1).expand(batch_size*n,k,n)
-            coef = hard + soft - soft.detach()
-            selected_arcs = selected_arcs.view(batch_size, n, -1)
+        s_arc_filter = s_arc_filter.view(batch_size*n,n)
+        # Warm-up
+        s_arc_filter *= self.gumbel_beta if self.training else 1
+        m = torch.distributions.gumbel.Gumbel(s_arc_filter, torch.tensor([self.gumbel_scale]).cuda())
+        # Add Gumbel noise to filter scores
+        s_arc_filter = m.sample(torch.tensor([1]).cuda()).squeeze(0).view(batch_size*n,n) if self.training else s_arc_filter
+        # Apply softmax to noisy filter logits without out of bounds arcs
+        s_arc_filter = torch.nn.Softmax(dim=1)(s_arc_filter+full_mask.view(batch_size*n,n)) #(BN,N)
+        s_arc_filter_modified = s_arc_filter.detach().clone()
+        if self.training:
+            # Add gold arcs
+            golds = golds.view(batch_size*n,n)
+            s_arc_filter_modified = torch.where(golds > 1, golds, s_arc_filter_modified)
+        selected_arcs = torch.topk(s_arc_filter_modified, k, dim=1).indices.cuda()
+        hard = torch.nn.functional.one_hot(selected_arcs, num_classes=n)
+        soft = s_arc_filter.unsqueeze(1).expand(batch_size*n,k,n)
+        coef = hard + soft - soft.detach()
+        selected_arcs = selected_arcs.view(batch_size, n, -1)
         # extract the correct mask filter
         arc_seq_mask = arc_seq_mask.view((batch_size, n, n)).gather(2, selected_arcs).cuda()
         if self.average_other_arcs and self.training and remaining_heads > 0:
@@ -549,10 +512,9 @@ class ArcBiaffineDependencyModel(Model):
             s_arc_filter.clone(), arc_seq_mask, lengths, lengths_arcs, arcs, batch_size, n, filter_factor)
 
         # extract the vectors for the k best heads per word
-        if self.use_gumbel_sampling:
-            arc_layers = torch.einsum('bkn,bnd->bkd', coef, arc_layers.reshape(batch_size*n,n,arc_size)).view(batch_size, cutoff, arc_size)
-            if self.use_rel_biaffine:
-                rel_layers = torch.einsum('bkn,bnd->bkd', coef, rel_layers.reshape(batch_size*n,n,rel_size)).view(batch_size, cutoff, rel_size)
+        arc_layers = torch.einsum('bkn,bnd->bkd', coef, arc_layers.reshape(batch_size*n,n,arc_size)).view(batch_size, cutoff, arc_size)
+        if self.use_rel_biaffine:
+            rel_layers = torch.einsum('bkn,bnd->bkd', coef, rel_layers.reshape(batch_size*n,n,rel_size)).view(batch_size, cutoff, rel_size)
 
         return arc_layers, rel_layers, s_arc_filter, arc_seq_mask, selected_arcs, lengths_arcs, cutoff
 
